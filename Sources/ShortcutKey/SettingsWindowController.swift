@@ -107,6 +107,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     func refresh() {
+        let scrollOrigin = listScroll.contentView.bounds.origin
         listDocument.subviews.forEach { $0.removeFromSuperview() }
         let bindings = appDelegate.config.configuration.bindings
         addFinderButton.isHidden = bindings.contains { $0.bundleID == "com.apple.finder" }
@@ -122,7 +123,8 @@ final class SettingsWindowController: NSWindowController {
             listDocument.addSubview(row)
         }
         listDocument.frame = NSRect(x: 0, y: 0, width: 600, height: max(40, CGFloat(bindings.count) * 40))
-        listScroll.contentView.scroll(to: .zero)
+        let maxScrollY = max(0, listDocument.frame.height - listScroll.contentView.bounds.height)
+        listScroll.contentView.scroll(to: NSPoint(x: scrollOrigin.x, y: min(scrollOrigin.y, maxScrollY)))
         listScroll.reflectScrolledClipView(listScroll.contentView)
         pathField.stringValue = appDelegate.config.displayPath
         refreshStatus()
@@ -130,6 +132,12 @@ final class SettingsWindowController: NSWindowController {
 
     func refreshStatus() {
         statusLabel.stringValue = appDelegate.statusMessage
+        let isError = appDelegate.statusMessage.hasPrefix("保存失败：")
+            || appDelegate.statusMessage.hasPrefix("配置读取失败：")
+            || appDelegate.statusMessage.hasPrefix("路径更新失败：")
+            || appDelegate.statusMessage.hasPrefix("开机启动设置失败：")
+        statusLabel.textColor = isError ? .systemPink : .secondaryLabelColor
+        statusLabel.font = isError ? .boldSystemFont(ofSize: 13) : .systemFont(ofSize: 13)
         launchCheckbox.state = appDelegate.launchAtLogin ? .on : .off
     }
 
@@ -186,14 +194,22 @@ final class SettingsWindowController: NSWindowController {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.application]
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
+        panel.delegate = self
+        panel.message = "可一次选择多个应用；已添加的应用不可重复选择。"
         panel.prompt = "添加"
         panel.beginSheetModal(for: window!) { [weak self] result in
-            guard result == .OK, let url = panel.url, let bundle = Bundle(url: url),
-                  let bundleID = bundle.bundleIdentifier, let self else { return }
+            guard result == .OK, let self else { return }
             var updated = self.appDelegate.config.configuration
-            updated.bindings.append(Binding(bundleID: bundleID, appPath: url.path))
-            self.appDelegate.save(updated)
+            var existingIDs = Set(updated.bindings.map(\.bundleID))
+            for url in panel.urls {
+                guard let bundleID = Bundle(url: url)?.bundleIdentifier,
+                      existingIDs.insert(bundleID).inserted else { continue }
+                updated.bindings.append(Binding(bundleID: bundleID, appPath: url.path))
+            }
+            if updated.bindings.count != self.appDelegate.config.configuration.bindings.count {
+                self.appDelegate.save(updated)
+            }
         }
     }
 
@@ -214,6 +230,14 @@ final class SettingsWindowController: NSWindowController {
     @objc private func applyPath() { appDelegate.changeConfigPath(pathField.stringValue) }
     @objc private func changeLaunchAtLogin() { appDelegate.setLaunchAtLogin(launchCheckbox.state == .on) }
     @objc private func reloadConfig() { appDelegate.reloadConfiguration(); refresh() }
+}
+
+extension SettingsWindowController: NSOpenSavePanelDelegate {
+    func panel(_ sender: Any, shouldEnable url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "app",
+              let bundleID = Bundle(url: url)?.bundleIdentifier else { return true }
+        return !appDelegate.config.configuration.bindings.contains { $0.bundleID == bundleID }
+    }
 }
 
 private final class FlippedView: NSView {
