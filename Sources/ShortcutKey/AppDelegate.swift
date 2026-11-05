@@ -15,9 +15,29 @@ import ServiceManagement
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = MenuBarIcon.make()
+        installEditMenu()
         buildMenu()
         reloadConfiguration()
         if config.configuration.bindings.isEmpty { openSettings() }
+    }
+
+    private func installEditMenu() {
+        let mainMenu = NSMenu()
+        let editItem = NSMenuItem(title: "编辑", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "编辑")
+        for (title, action, key) in [
+            ("剪切", #selector(NSText.cut(_:)), "x"),
+            ("复制", #selector(NSText.copy(_:)), "c"),
+            ("粘贴", #selector(NSText.paste(_:)), "v"),
+            ("全选", #selector(NSText.selectAll(_:)), "a")
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = .command
+            editMenu.addItem(item)
+        }
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func buildMenu() {

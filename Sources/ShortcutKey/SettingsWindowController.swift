@@ -8,10 +8,11 @@ final class SettingsWindowController: NSWindowController {
     private let statusLabel = NSTextField(labelWithString: "")
     private let launchCheckbox = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
     private let addFinderButton = NSButton(title: "添加访达", target: nil, action: nil)
+    private var windowShortcutButtons: [WindowAction: ShortcutRecorder] = [:]
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 470),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
                               styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "ShortcutKey 设置"
         window.collectionBehavior.insert(.moveToActiveSpace)
@@ -39,45 +40,43 @@ final class SettingsWindowController: NSWindowController {
             root.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20)
         ])
 
-        let intro = NSTextField(labelWithString: "按 ⌥ + 键切换应用；应用已在最前面时再次按键会隐藏它。")
-        root.addArrangedSubview(intro)
-
-        let header = horizontal()
-        let title = NSTextField(labelWithString: "快捷键")
-        title.font = .boldSystemFont(ofSize: 13)
-        header.addArrangedSubview(title)
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        header.addArrangedSubview(spacer)
-        addFinderButton.target = self
-        addFinderButton.action = #selector(addFinder)
-        header.addArrangedSubview(addFinderButton)
-        let add = NSButton(title: "添加应用…", target: self, action: #selector(addApplication))
-        header.addArrangedSubview(add)
-        root.addArrangedSubview(header)
-        header.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-
-        listScroll.hasVerticalScroller = true
-        listScroll.drawsBackground = false
-        listDocument.frame = NSRect(x: 0, y: 0, width: 600, height: 1)
-        listScroll.documentView = listDocument
-        root.addArrangedSubview(listScroll)
-        listScroll.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        listScroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let tabs = NSTabView()
+        tabs.tabViewType = .topTabsBezelBorder
+        let appTab = NSTabViewItem(identifier: "apps")
+        appTab.label = "应用切换"
+        appTab.view = makeAppTab()
+        tabs.addTabViewItem(appTab)
+        let windowTab = NSTabViewItem(identifier: "windows")
+        windowTab.label = "窗口布局"
+        windowTab.view = makeWindowTab()
+        tabs.addTabViewItem(windowTab)
+        root.addArrangedSubview(tabs)
+        tabs.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        tabs.setContentHuggingPriority(.defaultLow, for: .vertical)
 
         let pathTitle = NSTextField(labelWithString: "配置文件路径")
         pathTitle.font = .boldSystemFont(ofSize: 13)
         root.addArrangedSubview(pathTitle)
         let pathRow = horizontal()
         pathField.placeholderString = "~/.config/shortcut-key/config.json"
+        pathField.isEditable = true
+        pathField.isSelectable = true
         pathField.target = self
         pathField.action = #selector(applyPath)
         pathRow.addArrangedSubview(pathField)
-        let apply = NSButton(title: "应用路径", target: self, action: #selector(applyPath))
-        pathRow.addArrangedSubview(apply)
         root.addArrangedSubview(pathRow)
         pathRow.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let pathActions = horizontal()
+        pathActions.addArrangedSubview(NSButton(title: "选择文件…", target: self, action: #selector(chooseConfigFile)))
+        pathActions.addArrangedSubview(NSButton(title: "在访达中显示", target: self, action: #selector(revealConfigFile)))
+        let pathSpacer = NSView()
+        pathSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        pathActions.addArrangedSubview(pathSpacer)
+        pathActions.addArrangedSubview(NSButton(title: "应用路径", target: self, action: #selector(applyPath)))
+        root.addArrangedSubview(pathActions)
+        pathActions.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
 
         let footer = horizontal()
         launchCheckbox.target = self
@@ -98,6 +97,108 @@ final class SettingsWindowController: NSWindowController {
         statusLabel.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
     }
 
+    private func makeTabContent(_ stack: NSStackView) -> NSView {
+        let content = NSView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14)
+        ])
+        return content
+    }
+
+    private func makeAppTab() -> NSView {
+        let stack = NSStackView()
+        let intro = NSTextField(labelWithString: "按 ⌥ + 键切换应用；再次按键会隐藏前台应用。")
+        intro.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(intro)
+        let header = horizontal()
+        let title = NSTextField(labelWithString: "快捷键")
+        title.font = .boldSystemFont(ofSize: 13)
+        header.addArrangedSubview(title)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        header.addArrangedSubview(spacer)
+        addFinderButton.target = self
+        addFinderButton.action = #selector(addFinder)
+        header.addArrangedSubview(addFinderButton)
+        let add = NSButton(title: "添加应用…", target: self, action: #selector(addApplication))
+        header.addArrangedSubview(add)
+        stack.addArrangedSubview(header)
+        header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        listScroll.hasVerticalScroller = true
+        listScroll.drawsBackground = false
+        listDocument.frame = NSRect(x: 0, y: 0, width: 550, height: 1)
+        listScroll.documentView = listDocument
+        stack.addArrangedSubview(listScroll)
+        listScroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        listScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
+        listScroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+        return makeTabContent(stack)
+    }
+
+    private func makeWindowTab() -> NSView {
+        let stack = NSStackView()
+        let windowHint = NSTextField(labelWithString: "为当前最前面的窗口设置组合键；首次使用需允许辅助功能权限。")
+        windowHint.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(windowHint)
+        let actions = horizontal()
+        actions.distribution = .fillEqually
+        actions.spacing = 16
+        for action in WindowAction.allCases {
+            let column = NSStackView()
+            column.orientation = .vertical
+            column.alignment = .centerX
+            column.spacing = 12
+            let icon = NSImageView(image: WindowLayoutIcon.make(for: action))
+            icon.imageScaling = .scaleProportionallyUpOrDown
+            icon.toolTip = action.title
+            icon.setAccessibilityLabel(action.title)
+            icon.widthAnchor.constraint(equalToConstant: 72).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 56).isActive = true
+            column.addArrangedSubview(icon)
+            let recorder = ShortcutRecorder(title: "录入组合键", target: nil, action: nil)
+            recorder.recordsCombination = true
+            recorder.target = recorder
+            recorder.action = #selector(ShortcutRecorder.startRecordingAction)
+            recorder.toolTip = action.title
+            recorder.setAccessibilityLabel("\(action.title)快捷键")
+            recorder.widthAnchor.constraint(equalToConstant: 160).isActive = true
+            recorder.onBegin = { [weak self] in self?.appDelegate.beginRecording() }
+            recorder.onFinishCombination = { [weak self] code, keyName, modifiers in
+                guard let self else { return }
+                if let code, let keyName, let modifiers {
+                    var updated = self.appDelegate.config.configuration
+                    updated.windowShortcuts[action] = WindowShortcut(keyCode: code, keyName: keyName, modifiers: modifiers)
+                    DispatchQueue.main.async { self.appDelegate.save(updated) }
+                } else {
+                    DispatchQueue.main.async { self.appDelegate.endRecording(); self.refresh() }
+                }
+            }
+            column.addArrangedSubview(recorder)
+            let clear = NSButton(title: "清除", target: self, action: #selector(clearWindowShortcut(_:)))
+            clear.identifier = NSUserInterfaceItemIdentifier(action.rawValue)
+            clear.toolTip = "清除\(action.title)快捷键"
+            clear.setAccessibilityLabel("清除\(action.title)快捷键")
+            column.addArrangedSubview(clear)
+            windowShortcutButtons[action] = recorder
+            actions.addArrangedSubview(column)
+        }
+        stack.addArrangedSubview(actions)
+        actions.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        stack.addArrangedSubview(spacer)
+        return makeTabContent(stack)
+    }
+
     private func horizontal() -> NSStackView {
         let stack = NSStackView()
         stack.orientation = .horizontal
@@ -114,19 +215,25 @@ final class SettingsWindowController: NSWindowController {
         if bindings.isEmpty {
             let empty = NSTextField(labelWithString: "尚未添加应用")
             empty.textColor = .secondaryLabelColor
-            empty.frame = NSRect(x: 0, y: 8, width: 580, height: 24)
+            empty.frame = NSRect(x: 0, y: 8, width: 540, height: 24)
             listDocument.addSubview(empty)
         }
         for (index, binding) in bindings.enumerated() {
             let row = makeRow(binding)
-            row.frame = NSRect(x: 0, y: CGFloat(index) * 40, width: 580, height: 34)
+            row.frame = NSRect(x: 0, y: CGFloat(index) * 40, width: 540, height: 34)
             listDocument.addSubview(row)
         }
-        listDocument.frame = NSRect(x: 0, y: 0, width: 600, height: max(40, CGFloat(bindings.count) * 40))
+        listDocument.frame = NSRect(x: 0, y: 0, width: 550, height: max(40, CGFloat(bindings.count) * 40))
         let maxScrollY = max(0, listDocument.frame.height - listScroll.contentView.bounds.height)
         listScroll.contentView.scroll(to: NSPoint(x: scrollOrigin.x, y: min(scrollOrigin.y, maxScrollY)))
         listScroll.reflectScrolledClipView(listScroll.contentView)
         pathField.stringValue = appDelegate.config.displayPath
+        for action in WindowAction.allCases {
+            let shortcut = appDelegate.config.configuration.windowShortcuts[action]
+            windowShortcutButtons[action]?.title = shortcut.map {
+                ShortcutModifier.symbols($0.modifiers) + $0.keyName
+            } ?? "录入组合键"
+        }
         refreshStatus()
     }
 
@@ -227,7 +334,38 @@ final class SettingsWindowController: NSWindowController {
         appDelegate.save(updated)
     }
 
+    @objc private func clearWindowShortcut(_ sender: NSButton) {
+        guard let rawValue = sender.identifier?.rawValue,
+              let action = WindowAction(rawValue: rawValue) else { return }
+        var updated = appDelegate.config.configuration
+        updated.windowShortcuts[action] = nil
+        appDelegate.save(updated)
+    }
+
     @objc private func applyPath() { appDelegate.changeConfigPath(pathField.stringValue) }
+    @objc private func chooseConfigFile() {
+        guard let window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "选择现有的 JSON 配置文件。"
+        panel.prompt = "选择"
+        let directory = appDelegate.config.url.deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: directory.path) { panel.directoryURL = directory }
+        panel.beginSheetModal(for: window) { [weak self] result in
+            guard result == .OK, let url = panel.url, let self else { return }
+            self.pathField.stringValue = url.path
+            self.appDelegate.changeConfigPath(url.path)
+        }
+    }
+
+    @objc private func revealConfigFile() {
+        let url = appDelegate.config.url
+        guard FileManager.default.fileExists(atPath: url.path) else { NSSound.beep(); return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     @objc private func changeLaunchAtLogin() { appDelegate.setLaunchAtLogin(launchCheckbox.state == .on) }
     @objc private func reloadConfig() { appDelegate.reloadConfiguration(); refresh() }
 }

@@ -5,8 +5,14 @@ final class HotkeyManager {
     private static let signature: OSType = 0x534B4559 // SKEY
     private var handler: EventHandlerRef?
     private var registrations: [UInt32: EventHotKeyRef] = [:]
-    private var bindings: [UInt32: Binding] = [:]
+    private var actions: [UInt32: HotkeyAction] = [:]
     private let switcher = AppSwitcher()
+    private let windowManager = WindowManager()
+
+    private enum HotkeyAction {
+        case switchApp(Binding)
+        case arrangeWindow(WindowAction)
+    }
 
     init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -30,7 +36,7 @@ final class HotkeyManager {
     func suspend() {
         for ref in registrations.values { UnregisterEventHotKey(ref) }
         registrations.removeAll()
-        bindings.removeAll()
+        actions.removeAll()
     }
 
     @discardableResult
@@ -46,17 +52,43 @@ final class HotkeyManager {
                                             GetApplicationEventTarget(), 0, &ref)
             if status == noErr, let ref {
                 registrations[id] = ref
-                bindings[id] = binding
+                actions[id] = .switchApp(binding)
             } else {
                 errors.append("⌥\(binding.keyName ?? KeyCatalog.name(for: keyCode) ?? "?") 无法注册（系统错误 \(status)）")
+            }
+        }
+        for (index, action) in WindowAction.allCases.enumerated() {
+            guard let shortcut = configuration.windowShortcuts[action] else { continue }
+            let id = UInt32(configuration.bindings.count + index + 1)
+            let hotkeyID = EventHotKeyID(signature: Self.signature, id: id)
+            var ref: EventHotKeyRef?
+            let status = RegisterEventHotKey(shortcut.keyCode, carbonModifiers(shortcut.modifiers), hotkeyID,
+                                            GetApplicationEventTarget(), 0, &ref)
+            if status == noErr, let ref {
+                registrations[id] = ref
+                actions[id] = .arrangeWindow(action)
+            } else {
+                errors.append("\(ShortcutModifier.symbols(shortcut.modifiers))\(shortcut.keyName) 无法注册（系统错误 \(status)）")
             }
         }
         return errors
     }
 
+    private func carbonModifiers(_ modifiers: UInt32) -> UInt32 {
+        var result: UInt32 = 0
+        if modifiers & ShortcutModifier.shift != 0 { result |= UInt32(shiftKey) }
+        if modifiers & ShortcutModifier.control != 0 { result |= UInt32(controlKey) }
+        if modifiers & ShortcutModifier.option != 0 { result |= UInt32(optionKey) }
+        if modifiers & ShortcutModifier.command != 0 { result |= UInt32(cmdKey) }
+        return result
+    }
+
     private func handle(_ hotkeyID: EventHotKeyID) -> Bool {
-        guard hotkeyID.signature == Self.signature, let binding = bindings[hotkeyID.id] else { return false }
-        switcher.toggle(binding)
+        guard hotkeyID.signature == Self.signature, let action = actions[hotkeyID.id] else { return false }
+        switch action {
+        case .switchApp(let binding): switcher.toggle(binding)
+        case .arrangeWindow(let windowAction): windowManager.apply(windowAction)
+        }
         return true
     }
 }

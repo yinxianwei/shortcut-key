@@ -35,18 +35,73 @@ struct Binding: Codable, Identifiable, Equatable {
 struct Configuration: Codable {
     var version = 2
     var bindings: [Binding] = [.finder]
+    var windowShortcuts = WindowShortcuts()
+
+    private enum CodingKeys: String, CodingKey { case version, bindings, windowShortcuts }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        bindings = try values.decode([Binding].self, forKey: .bindings)
+        windowShortcuts = try values.decodeIfPresent(WindowShortcuts.self, forKey: .windowShortcuts) ?? WindowShortcuts()
+    }
+}
+
+enum WindowAction: String, CaseIterable {
+    case leftHalf, rightHalf, maximize
+
+    var title: String {
+        switch self {
+        case .leftHalf: "当前窗口置于左侧 50%"
+        case .rightHalf: "当前窗口置于右侧 50%"
+        case .maximize: "当前窗口铺满可用区域"
+        }
+    }
+}
+
+struct WindowShortcut: Codable, Equatable {
+    var keyCode: UInt32
+    var keyName: String
+    var modifiers: UInt32
+}
+
+struct WindowShortcuts: Codable {
+    var leftHalf: WindowShortcut?
+    var rightHalf: WindowShortcut?
+    var maximize: WindowShortcut?
+
+    subscript(_ action: WindowAction) -> WindowShortcut? {
+        get {
+            switch action {
+            case .leftHalf: leftHalf
+            case .rightHalf: rightHalf
+            case .maximize: maximize
+            }
+        }
+        set {
+            switch action {
+            case .leftHalf: leftHalf = newValue
+            case .rightHalf: rightHalf = newValue
+            case .maximize: maximize = newValue
+            }
+        }
+    }
 }
 
 enum ConfigError: LocalizedError {
     case invalidVersion
     case duplicateKey(String)
     case invalidBinding(String)
+    case invalidWindowShortcut(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidVersion: return "配置版本不受支持。"
-        case .duplicateKey(let name): return "快捷键 ⌥\(name) 被重复使用。"
+        case .duplicateKey(let name): return "快捷键 \(name) 被重复使用。"
         case .invalidBinding(let name): return "应用 \(name) 的配置不完整。"
+        case .invalidWindowShortcut(let name): return "窗口快捷键 \(name) 无效。"
         }
     }
 }
@@ -148,7 +203,7 @@ final class ConfigStore {
 
     private func validate(_ value: Configuration) throws {
         guard value.version == 1 || value.version == 2 else { throw ConfigError.invalidVersion }
-        var used = Set<UInt32>()
+        var used = Set<String>()
         for binding in value.bindings {
             guard !binding.bundleID.isEmpty, !binding.appPath.isEmpty else {
                 throw ConfigError.invalidBinding(binding.bundleID)
@@ -157,10 +212,38 @@ final class ConfigStore {
                 guard KeyCatalog.name(for: keyCode) != nil else {
                     throw ConfigError.invalidBinding(binding.bundleID)
                 }
-                guard used.insert(keyCode).inserted else {
-                    throw ConfigError.duplicateKey(binding.keyName ?? KeyCatalog.name(for: keyCode) ?? "")
+                guard used.insert("\(ShortcutModifier.option):\(keyCode)").inserted else {
+                    throw ConfigError.duplicateKey("⌥\(binding.keyName ?? KeyCatalog.name(for: keyCode) ?? "")")
                 }
             }
         }
+        for action in WindowAction.allCases {
+            guard let shortcut = value.windowShortcuts[action] else { continue }
+            guard KeyCatalog.name(for: shortcut.keyCode) != nil,
+                  shortcut.modifiers != 0,
+                  shortcut.modifiers & ~ShortcutModifier.all == 0 else {
+                throw ConfigError.invalidWindowShortcut(action.title)
+            }
+            guard used.insert("\(shortcut.modifiers):\(shortcut.keyCode)").inserted else {
+                throw ConfigError.duplicateKey("\(ShortcutModifier.symbols(shortcut.modifiers))\(shortcut.keyName)")
+            }
+        }
+    }
+}
+
+enum ShortcutModifier {
+    static let shift: UInt32 = 1
+    static let control: UInt32 = 2
+    static let option: UInt32 = 4
+    static let command: UInt32 = 8
+    static let all = shift | control | option | command
+
+    static func symbols(_ modifiers: UInt32) -> String {
+        var result = ""
+        if modifiers & control != 0 { result += "⌃" }
+        if modifiers & option != 0 { result += "⌥" }
+        if modifiers & shift != 0 { result += "⇧" }
+        if modifiers & command != 0 { result += "⌘" }
+        return result
     }
 }
