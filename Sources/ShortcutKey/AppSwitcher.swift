@@ -7,8 +7,8 @@ final class AppSwitcher {
             .first(where: { !$0.isTerminated })
 
         if let app = running {
-            if binding.bundleID == "com.apple.finder", !FinderWindowDetector.hasOpenWindow(processID: app.processIdentifier) {
-                openFinderWindow()
+            if !AppWindowDetector.hasOpenWindow(processID: app.processIdentifier) {
+                reopenWindow(for: binding, running: app)
                 return
             }
             if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
@@ -20,14 +20,18 @@ final class AppSwitcher {
             return
         }
 
+        reopenWindow(for: binding, running: nil)
+    }
+
+    private func reopenWindow(for binding: Binding, running: NSRunningApplication?) {
         if binding.bundleID == "com.apple.finder" {
             openFinderWindow()
             return
         }
-
         let savedURL = URL(fileURLWithPath: binding.appPath)
-        let appURL = FileManager.default.fileExists(atPath: savedURL.path)
-            ? savedURL : NSWorkspace.shared.urlForApplication(withBundleIdentifier: binding.bundleID)
+        let appURL = running?.bundleURL
+            ?? (FileManager.default.fileExists(atPath: savedURL.path)
+                ? savedURL : NSWorkspace.shared.urlForApplication(withBundleIdentifier: binding.bundleID))
         guard let appURL else {
             NSSound.beep()
             return
@@ -51,7 +55,7 @@ final class AppSwitcher {
     }
 }
 
-enum FinderWindowDetector {
+enum AppWindowDetector {
     static func hasOpenWindow(processID: pid_t) -> Bool {
         let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
         return hasOpenWindow(in: windows, processID: processID)
@@ -64,7 +68,7 @@ enum FinderWindowDetector {
                   let bounds = window[kCGWindowBounds as String] as? [String: Any],
                   let width = bounds["Width"] as? NSNumber,
                   let height = bounds["Height"] as? NSNumber else { return false }
-            // Finder's desktop and menu-bar surfaces are not file windows.
+            // Desktop and menu-bar surfaces are not ordinary app windows.
             return width.doubleValue >= 200 && height.doubleValue >= 100
         }
     }
