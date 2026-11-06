@@ -65,10 +65,11 @@ enum AppWindowDetector {
         windows.contains { window in
             guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processID,
                   (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  (window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true,
                   let bounds = window[kCGWindowBounds as String] as? [String: Any],
                   let width = bounds["Width"] as? NSNumber,
                   let height = bounds["Height"] as? NSNumber else { return false }
-            // Desktop and menu-bar surfaces are not ordinary app windows.
+            // Ignore offscreen helper windows, desktop and menu-bar surfaces.
             return width.doubleValue >= 200 && height.doubleValue >= 100
         }
     }
