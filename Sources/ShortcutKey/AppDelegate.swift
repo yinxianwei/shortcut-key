@@ -4,7 +4,9 @@ import ServiceManagement
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     let config = ConfigStore()
     let hotkeys = HotkeyManager()
+    let inputLock = InputSourceLock()
     private var statusItem: NSStatusItem!
+    private var inputLockMenuItem: NSMenuItem!
     private var settings: SettingsWindowController?
     private(set) var statusMessage = ""
 
@@ -16,6 +18,10 @@ import ServiceManagement
         // Keep the 19-point icon compact even on taller menu bars.
         statusItem = NSStatusBar.system.statusItem(withLength: 24)
         statusItem.button?.image = MenuBarIcon.make()
+        inputLock.onStatusChanged = { [weak self] in
+            self?.settings?.refreshInputLockStatus()
+            self?.updateInputLockMenu()
+        }
         installEditMenu()
         buildMenu()
         reloadConfiguration()
@@ -49,6 +55,10 @@ import ServiceManagement
         let reloadItem = NSMenuItem(title: "重新加载配置", action: #selector(reloadFromMenu), keyEquivalent: "")
         reloadItem.target = self
         menu.addItem(reloadItem)
+        inputLockMenuItem = NSMenuItem(title: "暂停输入法锁定", action: #selector(toggleInputLock), keyEquivalent: "")
+        inputLockMenuItem.target = self
+        menu.addItem(inputLockMenuItem)
+        updateInputLockMenu()
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "退出 ShortcutKey", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -78,13 +88,27 @@ import ServiceManagement
 
     @objc private func quit() { NSApp.terminate(nil) }
 
+    @objc private func toggleInputLock() {
+        var updated = config.configuration
+        updated.inputLock.enabled.toggle()
+        save(updated)
+    }
+
+    private func updateInputLockMenu() {
+        guard let inputLockMenuItem else { return }
+        inputLockMenuItem.isHidden = config.configuration.inputLock.sourceID == nil
+        inputLockMenuItem.title = config.configuration.inputLock.enabled ? "暂停输入法锁定" : "恢复输入法锁定"
+    }
+
     func reloadConfiguration() {
         do {
             try config.load()
+            inputLock.update(config.configuration.inputLock)
             let errors = hotkeys.register(config.configuration)
             statusMessage = errors.isEmpty ? "已加载 \(config.configuration.bindings.count) 条配置" : errors.joined(separator: "；")
         } catch {
             hotkeys.suspend()
+            inputLock.update(InputLockConfiguration())
             statusMessage = "配置读取失败：\(error.localizedDescription)"
         }
         settings?.refreshStatus()
@@ -93,6 +117,7 @@ import ServiceManagement
     func save(_ newValue: Configuration) {
         do {
             try config.replace(newValue)
+            inputLock.update(newValue.inputLock)
             let errors = hotkeys.register(newValue)
             statusMessage = errors.isEmpty ? "已保存" : errors.joined(separator: "；")
         } catch {
@@ -105,6 +130,7 @@ import ServiceManagement
     func changeConfigPath(_ path: String) {
         do {
             try config.changePath(path)
+            inputLock.update(config.configuration.inputLock)
             let errors = hotkeys.register(config.configuration)
             statusMessage = errors.isEmpty ? "配置路径已更新" : errors.joined(separator: "；")
         } catch {

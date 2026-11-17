@@ -17,6 +17,8 @@ final class ConfigStoreTests: XCTestCase {
         XCTAssertEqual(store.configuration.version, 2)
         XCTAssertEqual(store.configuration.bindings.map(\.bundleID), ["com.apple.finder"])
         XCTAssertNil(store.configuration.windowShortcuts.leftHalf)
+        XCTAssertFalse(store.configuration.inputLock.enabled)
+        XCTAssertNil(store.configuration.inputLock.sourceID)
     }
 
     func testExistingConfigurationGainsFinderWithoutLosingBindings() throws {
@@ -35,6 +37,7 @@ final class ConfigStoreTests: XCTestCase {
         XCTAssertNil(store.configuration.bindings[0].keyCode)
         XCTAssertEqual(store.configuration.bindings[1].keyCode, 7)
         XCTAssertNil(store.configuration.windowShortcuts.leftHalf)
+        XCTAssertFalse(store.configuration.inputLock.enabled)
 
         var edited = store.configuration
         edited.bindings.removeFirst()
@@ -77,5 +80,24 @@ final class ConfigStoreTests: XCTestCase {
         XCTAssertNil(store.configuration.windowShortcuts.leftHalf)
         XCTAssertNil(store.configuration.windowShortcuts.rightHalf)
         XCTAssertNil(store.configuration.windowShortcuts.maximize)
+        XCTAssertFalse(store.configuration.inputLock.enabled)
+    }
+
+    func testInputLockPersistsAndRequiresSelectedSource() throws {
+        let file = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConfigStore(urlOverride: file)
+        try store.load()
+
+        var edited = store.configuration
+        edited.inputLock.enabled = true
+        XCTAssertThrowsError(try store.replace(edited)) { error in
+            guard case ConfigError.missingInputSource = error else { return XCTFail("Expected missing input source") }
+        }
+        edited.inputLock.sourceID = "com.tencent.inputmethod.wetype.pinyin"
+        try store.replace(edited)
+        try store.load()
+        XCTAssertTrue(store.configuration.inputLock.enabled)
+        XCTAssertEqual(store.configuration.inputLock.sourceID, "com.tencent.inputmethod.wetype.pinyin")
     }
 }

@@ -9,6 +9,9 @@ final class SettingsWindowController: NSWindowController {
     private let launchCheckbox = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
     private let addFinderButton = NSButton(title: "添加访达", target: nil, action: nil)
     private var windowShortcutButtons: [WindowAction: ShortcutRecorder] = [:]
+    private let inputSourcePopup = NSPopUpButton()
+    private let inputLockCheckbox = NSButton(checkboxWithTitle: "锁定所选输入法", target: nil, action: nil)
+    private let inputLockStatusLabel = NSTextField(labelWithString: "")
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
@@ -50,6 +53,10 @@ final class SettingsWindowController: NSWindowController {
         windowTab.label = "窗口布局"
         windowTab.view = makeWindowTab()
         tabs.addTabViewItem(windowTab)
+        let inputTab = NSTabViewItem(identifier: "inputLock")
+        inputTab.label = "输入法锁定"
+        inputTab.view = makeInputLockTab()
+        tabs.addTabViewItem(inputTab)
         root.addArrangedSubview(tabs)
         tabs.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         tabs.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -199,6 +206,37 @@ final class SettingsWindowController: NSWindowController {
         return makeTabContent(stack)
     }
 
+    private func makeInputLockTab() -> NSView {
+        let stack = NSStackView()
+        let intro = NSTextField(labelWithString: "切换应用或输入法变化后，自动恢复为选定的输入法。")
+        intro.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(intro)
+
+        let sourceRow = horizontal()
+        sourceRow.addArrangedSubview(NSTextField(labelWithString: "默认输入法"))
+        inputSourcePopup.target = self
+        inputSourcePopup.action = #selector(changeInputSource)
+        inputSourcePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+        sourceRow.addArrangedSubview(inputSourcePopup)
+        sourceRow.addArrangedSubview(NSButton(title: "刷新列表", target: self, action: #selector(refreshInputSources)))
+        stack.addArrangedSubview(sourceRow)
+        sourceRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        inputLockCheckbox.target = self
+        inputLockCheckbox.action = #selector(changeInputLock)
+        stack.addArrangedSubview(inputLockCheckbox)
+        inputLockStatusLabel.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(inputLockStatusLabel)
+
+        let note = NSTextField(labelWithString: "安全输入期间不会强制切换；不读取键盘输入内容。")
+        note.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(note)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        stack.addArrangedSubview(spacer)
+        return makeTabContent(stack)
+    }
+
     private func horizontal() -> NSStackView {
         let stack = NSStackView()
         stack.orientation = .horizontal
@@ -234,7 +272,37 @@ final class SettingsWindowController: NSWindowController {
                 ShortcutModifier.symbols($0.modifiers) + $0.keyName
             } ?? "录入组合键"
         }
+        refreshInputLockControls()
         refreshStatus()
+    }
+
+    private func refreshInputLockControls() {
+        let sources = InputSourceLock.availableSources()
+        let configuredID = appDelegate.config.configuration.inputLock.sourceID
+        let selectedID = configuredID ?? InputSourceLock.currentSourceID()
+        inputSourcePopup.removeAllItems()
+        for source in sources {
+            inputSourcePopup.addItem(withTitle: source.name)
+            inputSourcePopup.lastItem?.representedObject = source.id
+        }
+        if let configuredID, !sources.contains(where: { $0.id == configuredID }) {
+            inputSourcePopup.addItem(withTitle: "已不可用：\(configuredID)")
+            inputSourcePopup.lastItem?.representedObject = configuredID
+        }
+        if let selectedID,
+           let item = inputSourcePopup.itemArray.first(where: { $0.representedObject as? String == selectedID }) {
+            inputSourcePopup.select(item)
+        } else if !sources.isEmpty {
+            inputSourcePopup.selectItem(at: 0)
+        }
+        inputSourcePopup.isEnabled = !sources.isEmpty
+        inputLockCheckbox.state = appDelegate.config.configuration.inputLock.enabled ? .on : .off
+        inputLockCheckbox.isEnabled = !sources.isEmpty
+        refreshInputLockStatus()
+    }
+
+    func refreshInputLockStatus() {
+        inputLockStatusLabel.stringValue = appDelegate.inputLock.statusMessage
     }
 
     func refreshStatus() {
@@ -343,6 +411,30 @@ final class SettingsWindowController: NSWindowController {
     }
 
     @objc private func applyPath() { appDelegate.changeConfigPath(pathField.stringValue) }
+    @objc private func refreshInputSources() { refreshInputLockControls() }
+
+    @objc private func changeInputSource() {
+        guard let id = inputSourcePopup.selectedItem?.representedObject as? String else { return }
+        var updated = appDelegate.config.configuration
+        updated.inputLock.sourceID = id
+        appDelegate.save(updated)
+    }
+
+    @objc private func changeInputLock() {
+        var updated = appDelegate.config.configuration
+        if inputLockCheckbox.state == .on {
+            guard let id = inputSourcePopup.selectedItem?.representedObject as? String,
+                  InputSourceLock.availableSources().contains(where: { $0.id == id }) else {
+                inputLockCheckbox.state = .off
+                NSSound.beep()
+                return
+            }
+            updated.inputLock.sourceID = id
+        }
+        updated.inputLock.enabled = inputLockCheckbox.state == .on
+        appDelegate.save(updated)
+    }
+
     @objc private func chooseConfigFile() {
         guard let window else { return }
         let panel = NSOpenPanel()

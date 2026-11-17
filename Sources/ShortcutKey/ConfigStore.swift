@@ -36,8 +36,9 @@ struct Configuration: Codable {
     var version = 2
     var bindings: [Binding] = [.finder]
     var windowShortcuts = WindowShortcuts()
+    var inputLock = InputLockConfiguration()
 
-    private enum CodingKeys: String, CodingKey { case version, bindings, windowShortcuts }
+    private enum CodingKeys: String, CodingKey { case version, bindings, windowShortcuts, inputLock }
 
     init() {}
 
@@ -46,7 +47,13 @@ struct Configuration: Codable {
         version = try values.decode(Int.self, forKey: .version)
         bindings = try values.decode([Binding].self, forKey: .bindings)
         windowShortcuts = try values.decodeIfPresent(WindowShortcuts.self, forKey: .windowShortcuts) ?? WindowShortcuts()
+        inputLock = try values.decodeIfPresent(InputLockConfiguration.self, forKey: .inputLock) ?? InputLockConfiguration()
     }
+}
+
+struct InputLockConfiguration: Codable, Equatable {
+    var enabled = false
+    var sourceID: String?
 }
 
 enum WindowAction: String, CaseIterable {
@@ -95,6 +102,7 @@ enum ConfigError: LocalizedError {
     case duplicateKey(String)
     case invalidBinding(String)
     case invalidWindowShortcut(String)
+    case missingInputSource
 
     var errorDescription: String? {
         switch self {
@@ -102,6 +110,7 @@ enum ConfigError: LocalizedError {
         case .duplicateKey(let name): return "快捷键 \(name) 被重复使用。"
         case .invalidBinding(let name): return "应用 \(name) 的配置不完整。"
         case .invalidWindowShortcut(let name): return "窗口快捷键 \(name) 无效。"
+        case .missingInputSource: return "请先选择要锁定的输入法。"
         }
     }
 }
@@ -227,6 +236,9 @@ final class ConfigStore {
             guard used.insert("\(shortcut.modifiers):\(shortcut.keyCode)").inserted else {
                 throw ConfigError.duplicateKey("\(ShortcutModifier.symbols(shortcut.modifiers))\(shortcut.keyName)")
             }
+        }
+        if value.inputLock.enabled && (value.inputLock.sourceID?.isEmpty ?? true) {
+            throw ConfigError.missingInputSource
         }
     }
 }
