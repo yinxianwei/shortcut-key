@@ -13,7 +13,8 @@ import ServiceManagement
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
         }
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // Keep the 19-point icon compact even on taller menu bars.
+        statusItem = NSStatusBar.system.statusItem(withLength: 24)
         statusItem.button?.image = MenuBarIcon.make()
         installEditMenu()
         buildMenu()
